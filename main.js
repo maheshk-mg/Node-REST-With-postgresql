@@ -105,16 +105,55 @@ app.delete("/deleteUser/:id", async (req, res) => {
 });
 
 //============================ TASK API Endpoints ============================
+
+
+// GET /getTasks - Retrieve all tasks with pagination for admin users
 app.get("/getTasks", async (req, res) => {
-  const selectQuery = "SELECT * from tasks";
+  // Get page and limit from query params
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 2;
+
+  const offset = (page - 1) * limit;
+
+  // Query to get paginated tasks
+  const selectQuery = `
+    SELECT *
+    FROM tasks
+    WHERE deleted_at IS NULL
+    ORDER BY task_id ASC
+    LIMIT $1 OFFSET $2
+  `;
+
+  // Query to get total count
+  const countQuery = `
+    SELECT COUNT(*) 
+    FROM tasks
+    WHERE deleted_at IS NULL
+  `;
 
   try {
-    const result = await connection.query(selectQuery);
-    console.log("Task retrieved successfully", result);
-    res.status(200).json(result.rows);
+    // Execute queries
+    const result = await connection.query(selectQuery, [limit, offset]);
+    const countResult = await connection.query(countQuery);
+
+    const totalRecords = parseInt(countResult.rows[0].count);
+    const totalPages = Math.ceil(totalRecords / limit);
+
+    console.log("Tasks retrieved successfully");
+
+    res.status(200).json({
+      page,
+      limit,
+      totalRecords,
+      totalPages,
+      data: result.rows,
+    });
+
   } catch (err) {
-    console.error("Error getting task", err);
-    res.status(500).json({ error: "Internal Server Error" });
+    console.error("Error getting tasks", err);
+    res.status(500).json({
+      error: "Internal Server Error"
+    });
   }
 });
 
@@ -135,11 +174,10 @@ app.get("/getTasks/:user_id", async (req, res) => {
   }
 });
 
-app.post("/addTask", async (req, res) => {  
+app.post("/addTask", async (req, res) => {
   const { title, description, status, user_id } = req.body;
   const insertQuery =
     "INSERT INTO tasks (title, description, status, user_id) VALUES ($1, $2, $3, $4)";
-  
 
   if (!title || !description || !user_id) {
     return res
@@ -147,16 +185,15 @@ app.post("/addTask", async (req, res) => {
       .json({ error: "Title, description and user_id required" });
   }
 
-    // Validate status if provided
-  const validStatuses = ['pending', 'in_progress', 'completed'];
-  const taskStatus = status || 'pending';
-  
+  // Validate status if provided
+  const validStatuses = ["pending", "in_progress", "completed"];
+  const taskStatus = status || "pending";
+
   if (!validStatuses.includes(taskStatus)) {
-    return res.status(400).json({ 
-      error: `Status must be one of: ${validStatuses.join(', ')}` 
+    return res.status(400).json({
+      error: `Status must be one of: ${validStatuses.join(", ")}`,
     });
   }
-
 
   try {
     const result = await connection.query(insertQuery, [
@@ -173,19 +210,54 @@ app.post("/addTask", async (req, res) => {
   }
 });
 
-app.put("/updateTask/:id", async (req, res) => {
-  const { id } = req.params;
-  const { title, description, status } = req.body;
+app.put("/updateTaskStatusByUser/:task_id", async (req, res) => {
+  const { task_id } = req.params;
+  const { status, user_id } = req.body;
   const updateQuery =
-    "UPDATE tasks SET title = $1, description = $2, status = $3 WHERE task_id = $4";   
-    
-    
+    "UPDATE tasks SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE task_id = $2 AND user_id = $3 RETURNING *";
 
-})
- 
+  const validStatuses = ["pending", "in_progress", "completed"];
 
+  if (!validStatuses.includes(status)) {
+    return res.status(400).json({
+      error: `Status must be one of: ${validStatuses.join(", ")}`,
+    });
+  }
 
+  try {
+    const result = await connection.query(updateQuery, [status,task_id, user_id]);
+    if (result.rowCount === 0) {
+      return res
+        .status(404)
+        .json({ error: "User not found or no tasks to update" });
+    }
+    console.log("Task status updated successfully", result);
+    res.status(200).json({ message: "Task status updated successfully" });
+  } catch (err) {
+    console.error("Error update task status", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 
+app.delete("/deleteTaskByUser/:task_id", async (req, res) => {
+  const { task_id } = req.params;
+  const { user_id } = req.body;
+  const deleteQuery = "DELETE FROM tasks WHERE task_id = $1 AND user_id = $2";
+  
+  try {
+    const result = await  connection.query(deleteQuery, [task_id, user_id]);
+    if (result.rowCount === 0) {
+      return res
+        .status(404)
+        .json({ error: "User not found or no tasks to delete" });
+    }     
+    console.log("Task deleted successfully", result);
+    res.status(200).json({ message: "Task deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting task", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  } 
+}); 
 
 
 
